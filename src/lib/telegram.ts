@@ -64,7 +64,11 @@ bot.command("start", async ctx => {
 bot.callbackQuery("categories", async ctx => {
   await ctx.answerCallbackQuery();
   await dbConnect();
-  const cats = await Category.find({ active: true }).sort({ name: 1 }).lean();
+  const cats = await Category.find({
+    active: true,
+  })
+    .sort({ name: 1 })
+    .lean<any[]>();
   const kb = new InlineKeyboard();
   for (const c of cats) kb.text(`${c.emoji} ${c.name}`, `cat:${c._id}`).row();
   kb.text("⬅️ Menu", "home");
@@ -105,7 +109,9 @@ bot.callbackQuery(/^product:(.+)$/, async ctx => {
 bot.callbackQuery("balance", async ctx => {
   await ctx.answerCallbackQuery();
   await dbConnect();
-  const u = await User.findOne({ telegramId: String(ctx.from.id) }).lean();
+  const u = await User.findOne({
+    telegramId: String(ctx.from.id),
+  }).lean<any>();
   await ctx.editMessageText(`💰 *Saldo Anda*\n\nRp${(u?.balance || 0).toLocaleString("id-ID")}`, {
     parse_mode: "Markdown", reply_markup: new InlineKeyboard().text("➕ Deposit", "deposit").text("⬅️ Menu", "home")
   });
@@ -169,8 +175,8 @@ bot.callbackQuery(/^buy:(.+)$/, async ctx => {
   const productId = ctx.match[1];
   const telegramId = String(ctx.from.id);
 
-  const p = await Product.findById(productId);
-  const u = await User.findOne({ telegramId });
+  const p = await Product.findById(productId).lean();
+  const u = await User.findOne({ telegramId }).lean();
 
   if (!p || !u || !p.active) return ctx.reply("Produk tidak tersedia.");
   if (p.stock <= 0) return ctx.reply("Stok habis.");
