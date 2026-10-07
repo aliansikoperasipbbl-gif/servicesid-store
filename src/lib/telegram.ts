@@ -13,12 +13,31 @@ const mainKeyboard = new InlineKeyboard()
   .text("➕ Deposit", "deposit").text("📦 Pesanan", "orders").row()
   .text("ℹ️ Bantuan", "help");
 
-async function settings() {
+type StoreSettings = {
+  storeName: string;
+  tagline: string;
+  welcomeText: string;
+};
+
+async function settings(): Promise<StoreSettings> {
   await dbConnect();
-  return (await Settings.findOne({ key: "main" }).lean()) || {
-    storeName: process.env.STORE_NAME || "ServicesId Store",
-    tagline: process.env.STORE_TAGLINE || "",
-    welcomeText: "Selamat datang!"
+
+  const doc = await Settings.findOne({ key: "main" }).lean();
+
+  return {
+    storeName:
+      doc?.storeName ||
+      process.env.STORE_NAME ||
+      "ServicesId Store",
+
+    tagline:
+      doc?.tagline ||
+      process.env.STORE_TAGLINE ||
+      "Belanja produk digital dengan cepat & aman",
+
+    welcomeText:
+      doc?.welcomeText ||
+      "Selamat datang di ServicesId Store 💚",
   };
 }
 
