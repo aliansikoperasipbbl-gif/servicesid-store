@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { dbConnect } from "./db";
 import { Category, Product, Settings, User, Deposit } from "./models";
 import { isTelegramAdmin } from "./auth";
@@ -74,7 +74,12 @@ bot.callbackQuery("categories", async ctx => {
 bot.callbackQuery(/^cat:(.+)$/, async ctx => {
   await ctx.answerCallbackQuery();
   await dbConnect();
-  const products = await Product.find({ categoryId: ctx.match[1], active: true }).sort({ name: 1 }).lean();
+  const products = await Product.find({
+    categoryId: ctx.match[1],
+    active: true,
+  })
+    .sort({ name: 1 })
+    .lean<any[]>();
   const kb = new InlineKeyboard();
   for (const p of products) {
     kb.text(`${p.name} — Rp${p.price.toLocaleString("id-ID")}`, `product:${p._id}`).row();
@@ -121,12 +126,16 @@ bot.hears(/^deposit\s+(\d+)$/i, async ctx => {
   await dbConnect();
   const reference = `SID-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
   const pay = await createCasakuQR({ amount, reference, customerId: String(ctx.from.id) });
-  const qr = pay.qrImage || await QRCode.toDataURL(pay.qrText);
+  
+  const qrBuffer = await QRCode.toBuffer(pay.qrText);
+  const photo = pay.qrImage && pay.qrImage.startsWith("http") ? pay.qrImage : new InputFile(qrBuffer);
+
   await Deposit.create({
     telegramId: String(ctx.from.id), amount, reference, status: "PENDING",
-    qrText: pay.qrText, qrImage: qr, gatewayId: pay.gatewayId, expiresAt: pay.expiresAt
+    qrText: pay.qrText, qrImage: pay.qrImage || "", gatewayId: pay.gatewayId, expiresAt: pay.expiresAt
   });
-  await ctx.replyWithPhoto(qr, {
+
+  await ctx.replyWithPhoto(photo, {
     caption: `🟩 *Pembayaran Deposit*\n\nNominal: *Rp${amount.toLocaleString("id-ID")}*\nRef: \`${reference}\`\n\nScan QR lalu bayar. Saldo akan bertambah otomatis setelah Casaku mengirim status PAID.`,
     parse_mode: "Markdown"
   });
@@ -156,14 +165,37 @@ bot.callbackQuery("orders", async ctx => {
 bot.callbackQuery(/^buy:(.+)$/, async ctx => {
   await ctx.answerCallbackQuery();
   await dbConnect();
-  const p = await Product.findById(ctx.match[1]);
-  const u = await User.findOne({ telegramId: String(ctx.from.id) });
+
+  const productId = ctx.match[1];
+  const telegramId = String(ctx.from.id);
+
+  const p = await Product.findById(productId);
+  const u = await User.findOne({ telegramId });
+
   if (!p || !u || !p.active) return ctx.reply("Produk tidak tersedia.");
-  if ((u.balance || 0) < p.price) return ctx.reply("Saldo tidak cukup. Silakan deposit terlebih dahulu.");
   if (p.stock <= 0) return ctx.reply("Stok habis.");
-  u.balance -= p.price;
-  p.stock -= 1;
-  await u.save(); await p.save();
+  if ((u.balance || 0) < p.price) return ctx.reply("Saldo tidak cukup. Silakan deposit terlebih dahulu.");
+
+  const updatedUser = await User.findOneAndUpdate(
+    { telegramId, balance: { $gte: p.price } },
+    { $inc: { balance: -p.price } },
+    { new: true }
+  );
+
+  if (!updatedUser) {
+    return ctx.reply("Gagal memproses. Saldo tidak mencukupi.");
+  }
+
+  const updatedProduct = await Product.findOneAndUpdate(
+    { _id: productId, stock: { $gt: 0 } },     {$inc: { stock: -1 } },
+    { new: true }
+  );
+
+  if (!updatedProduct) {
+    await User.updateOne({ telegramId }, { $inc: { balance: p.price } });
+    return ctx.reply("Stok baru saja habis. Saldo Anda tidak berkurang.");
+  }
+
   await ctx.reply(`✅ Pembelian berhasil!\n\n${p.name}\nHarga: Rp${p.price.toLocaleString("id-ID")}\n\n*Catatan:* sambungkan fulfillment digital Anda pada model Order untuk mengirim produk otomatis.`, { parse_mode: "Markdown" });
 });
 
